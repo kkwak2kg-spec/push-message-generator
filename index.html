@@ -14,9 +14,8 @@
     .grid { display:grid; grid-template-columns: 1.15fr 1fr; gap:16px; align-items:start; }
     .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
     .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-    label { font-size:12px; color:var(--muted); display:block; margin-bottom:6px; }
-    input, select { width:100%; padding:10px 12px; border-radius:12px; border:1px solid var(--line); background:#0d1422; color:var(--text); outline:none; }
-    input:focus, select:focus { border-color: rgba(110,231,255,.55); box-shadow: 0 0 0 3px rgba(110,231,255,.12); }
+    input { width:100%; padding:10px 12px; border-radius:12px; border:1px solid var(--line); background:#0d1422; color:var(--text); outline:none; }
+    input:focus { border-color: rgba(110,231,255,.55); box-shadow: 0 0 0 3px rgba(110,231,255,.12); }
     .btn { cursor:pointer; border:none; border-radius:12px; padding:10px 12px; background:#0d1422; color:var(--text); border:1px solid var(--line); }
     .btn.primary { background: rgba(110,231,255,.12); border-color: rgba(110,231,255,.35); }
     .btn:hover { filter: brightness(1.08); }
@@ -48,12 +47,11 @@
   <div class="wrap">
     <h1>PUSH 메시지 생성기 <span class="mini">(제목 25 byte · 본문 100 byte · 기본: 우편함 지급)</span></h1>
     <div class="sub">
-      보상(명칭/수량)을 입력하고 <b>생성</b>을 누르면, 매번 랜덤한 표현으로 KR/EN/JP 푸시 문구를 생성합니다.<br/>
-      <b>중복 문구는 자동으로 제외</b>하고, byte 제한을 넘으면 <b>자연스럽게 축약</b>합니다.
+      v27: KR 문장 자연스러움 개선(보상 위치/조사) — '우편함을 열어 다이아 300개를 확인' 형태로 정렬 + action 템플릿을 (보상 포함/미포함)으로 분리해 어색한 삽입 제거. KR 제목은 <b>보상명은 절대 자르지 않고</b>, 안 들어가면 다른 템플릿으로 다시 뽑습니다.<br/>
+      KR 제목/본문은 각각 25B/100B 안에서만 출력하며, KR은 중간 절단(…/...)이 발생하면 후보에서 제외합니다.
     </div>
 
     <div class="grid">
-      <!-- INPUT -->
       <div class="card">
         <div class="row" style="justify-content:space-between; margin-bottom:10px;">
           <div class="pill">제목 <b>25B</b> · 본문 <b>100B</b> · 전달 <b>우편함</b></div>
@@ -63,37 +61,7 @@
           </div>
         </div>
 
-        <div class="row" style="gap:12px; margin-bottom:12px;">
-          <div style="flex:1; min-width:190px;">
-            <label>사유</label>
-            <select id="reason">
-              <option value="generic">일반</option>
-              <option value="attendance">출석</option>
-              <option value="event">이벤트</option>
-              <option value="maintenance">점검</option>
-              <option value="apology">사과/보상</option>
-              <option value="deadline">만료 임박</option>
-            </select>
-          </div>
-          <div style="flex:1; min-width:190px;">
-            <label>CTA</label>
-            <select id="cta">
-              <option value="mailbox" selected>우편함 확인(존댓말)</option>
-              <option value="claim">지금 받기(존댓말)</option>
-              <option value="none">표시 안 함</option>
-            </select>
-          </div>
-          <div style="flex:1; min-width:190px;">
-            <label>생성 개수(언어별)</label>
-            <select id="count">
-              <option value="3">3개</option>
-              <option value="5" selected>5개</option>
-              <option value="8">8개</option>
-            </select>
-          </div>
-        </div>
-
-        <table class="table" id="rewardTable">
+        <table class="table">
           <thead>
             <tr>
               <th style="width:28%;">KR 보상명</th>
@@ -108,22 +76,21 @@
 
         <div class="hint">
           • EN/JP 보상명을 비워두면 KR 보상명을 그대로 사용합니다.<br/>
-          • “우편함 확인” 문구가 <b>두 번 반복되지 않도록</b> 자동으로 중복 요소를 제거합니다.
+          • EN/JP 결과에 한글(가-힣)이 섞이면 후보에서 제외하고 다시 뽑습니다.<br/>
+          • KR 제목은 <b>보상명</b>이 반드시 포함되며, 보상명은 <b>잘리지 않습니다</b>.
         </div>
       </div>
 
-      <!-- OUTPUT -->
       <div class="card">
         <div class="row" style="justify-content:space-between; margin-bottom:10px;">
-          <div class="pill">랜덤 템플릿 · 중복 제거 · 자동 축약</div>
+          <div class="pill">언어별 1건 · 창의성 우선 · 안전 축약</div>
           <button class="btn primary" id="generateBtn">생성</button>
         </div>
 
         <div class="outBox" id="outBox"></div>
 
         <div class="footer">
-          byte 계산: <code>TextEncoder().encode(text).length</code><br/>
-          축약 순서: (1) 선택 문장 요소 제거 → (2) 보상 요약 축소 → (3) 최종 안전 자르기
+          byte 계산: <code>TextEncoder().encode(text).length</code>
         </div>
       </div>
     </div>
@@ -133,43 +100,96 @@
   const TITLE_MAX = 25;
   const BODY_MAX  = 100;
   const enc = new TextEncoder();
+  const byteLen = (s) => enc.encode(s).length;
+  const nvl = (x) => (x ?? "").toString().trim();
 
-  function byteLen(s){ return enc.encode(s).length; }
-
-  // Crypto-safe random
   function randInt(max){
     const a = new Uint32Array(1);
     crypto.getRandomValues(a);
     return a[0] % max;
   }
-  function pick(arr){
-    if (!arr || arr.length === 0) return "";
-    return arr[randInt(arr.length)];
+  const pick = (arr) => (!arr || arr.length === 0) ? "" : arr[randInt(arr.length)];
+
+  function normalizeSpaces(s){
+    return (s || "")
+      .replace(/\s+/g, " ")
+      .replace(/\s+([!.?])/g, "$1")
+      .trim();
   }
 
-  function truncateToBytes(str, maxBytes){
+  function safeTruncate(str, maxBytes){
     if (byteLen(str) <= maxBytes) return { text: str, truncated: false };
     let out = "";
+    let lastBoundary = "";
     for (const ch of str){
       const next = out + ch;
       if (byteLen(next) > maxBytes) break;
       out = next;
+      if (/[ \t\n\r\.\!\?\,，、。・\/\+·:：\-\)]/.test(ch)) lastBoundary = out;
     }
-    return { text: out, truncated: true };
+    let candidate = (lastBoundary && byteLen(lastBoundary) >= Math.min(12, maxBytes)) ? lastBoundary : out;
+    candidate = candidate.trim().replace(/[,:：\/\+·\-]+$/g, "").trim();
+
+    // Add ellipsis for nicer cut (if possible)
+    if (candidate && !/[!.?。！？」]$/.test(candidate)){
+      // Ensure "…" fits, otherwise shorten by one char
+      if (byteLen(candidate + "…") <= maxBytes) candidate = candidate + "…";
+      else {
+        // remove last char until it fits
+        while (candidate && byteLen(candidate + "…") > maxBytes){
+          candidate = candidate.slice(0, -1).trim();
+        }
+        if (candidate) candidate = candidate + "…";
+      }
+    }
+    return { text: candidate, truncated: true };
   }
 
-  function nvl(x){ return (x ?? "").toString().trim(); }
+  const hasHangul = (s) => /[\uAC00-\uD7A3]/.test(s || "");
 
-  function compactReward(name, qty, lang){
-    const n = nvl(name);
+  // ---------- Korean particles ----------
+  function lastHangulSyllable(s){
+    for (let i = (s || "").length - 1; i >= 0; i--){
+      const code = s.charCodeAt(i);
+      if (code >= 0xAC00 && code <= 0xD7A3) return code;
+    }
+    return null;
+  }
+  function hasBatchim(s){
+    const code = lastHangulSyllable(s);
+    if (code === null) return false;
+    const jong = (code - 0xAC00) % 28;
+    return jong !== 0;
+  }
+  function particleFor(s, type){
+    const b = hasBatchim(s);
+    if (type === "subj") return b ? "이" : "가";
+    if (type === "obj")  return b ? "을" : "를";
+    if (type === "topic")return b ? "은" : "는";
+    return "";
+  }
+  function attachParticle(s, type){
+    const t = nvl(s);
+    if (!t) return t;
+    if (/[이가을를은는]$/.test(t)) return t;
+    return t + particleFor(t, type);
+  }
+
+  // ---------- Qty normalization (EN/JP) ----------
+  function extractDigits(qty){
+    const m = (qty || "").match(/\d+/g);
+    return m ? m.join("") : "";
+  }
+  function normalizeQty(qty, lang){
     const q = nvl(qty);
-    if (!n && !q) return "";
-    if (!q) return n;
-    // Add a space for readability (still byte-efficient enough under 100B)
-    const space = " ";
-    return `${n}${space}${q}`.trim();
+    if (!q) return "";
+    const digits = extractDigits(q);
+    if (!digits) return q;
+    if (lang === "KR") return q;
+    return digits;
   }
 
+  // ---------- Reward formatting ----------
   function pickName(r, lang){
     if (lang === "KR") return nvl(r.kr);
     if (lang === "EN") return nvl(r.en) || nvl(r.kr);
@@ -177,246 +197,651 @@
     return nvl(r.kr);
   }
 
-  function containsMailbox(text, lang){
-    const t = (text || "").toLowerCase();
-    if (lang === "KR") return t.includes("우편함");
-    if (lang === "EN") return t.includes("mailbox") || t.includes("mail");
-    if (lang === "JP") return t.includes("メール");
-    return false;
+  function itemText(r, lang){
+    const name = pickName(r, lang);
+    const qtyRaw = nvl(r.qty);
+    if (!name && !qtyRaw) return "";
+    if (lang === "KR"){
+      if (!qtyRaw) return name;
+      return `${name} ${qtyRaw}`.trim();
+    }
+    const qty = normalizeQty(qtyRaw, lang);
+    if (!qty) return name;
+    const mul = (lang === "JP") ? "×" : " x";
+    return `${name}${mul}${qty}`.trim();
   }
 
-  // Reward summary builder with style variation, within a byte budget.
-  function buildRewardSummary(rewards, lang, maxBytes){
-    const items = rewards
-      .map(r => ({ name: pickName(r, lang), qty: r.qty }))
-      .map(x => compactReward(x.name, x.qty, lang))
-      .filter(Boolean);
+  function buildRewardList(rewards, lang){
+    return rewards.map(r => itemText(r, lang)).filter(Boolean);
+  }
 
+  function splitKRItem(item){
+    const parts = (item || "").trim().split(/\s+/);
+    if (parts.length <= 1) return [item.trim(), ""];
+    const qty = parts.pop();
+    const name = parts.join(" ");
+    return [name, qty];
+  }
+
+  // Title KR: do NOT truncate reward name; if it can't fit, return "" to force resample.
+  function chooseKRCandidateTitle(item, maxBytes){
+    const it = (item || "").trim();
+    if (!it) return "";
+    if (byteLen(it) <= maxBytes) return it;
+    const [name, qty] = splitKRItem(it);
+    const cands = [];
+    if (name && qty) cands.push(`${name}${qty}`);
+    if (name) cands.push(name);
+    for (const c of cands){
+      if (c && byteLen(c) <= maxBytes) return c;
+    }
+    return "";
+  }
+
+  function chooseKRCandidateBody(item, maxBytes){
+    const it = (item || "").trim();
+    if (!it) return "";
+    if (byteLen(it) <= maxBytes) return it;
+    const [name, qty] = splitKRItem(it);
+    const cands = [];
+    if (name && qty) cands.push(`${name}${qty}`);
+    if (name) cands.push(name);
+    if (qty)  cands.push(qty);
+    for (const c of cands){
+      if (c && byteLen(c) <= maxBytes && c.length >= 2) return c;
+    }
+    return safeTruncate(it, maxBytes).text;
+  }
+
+  // Compute how many bytes are left for rewardShort, correctly (no extra -1)
+  function budgetForRewardShort(tpl){
+    const base = normalizeSpaces(tpl.replaceAll("{rewardShort}", ""));
+    return Math.max(0, TITLE_MAX - byteLen(base));
+  }
+
+  // KR title rewardShort: prefer including qty if possible, keep name intact (no cutting).
+  function buildKRTitleRewardShort(rewards, maxBytes){
+    const items = buildRewardList(rewards, "KR");
+    if (!items.length) return "";
+    const first = items[0]; // e.g., "다이아 300개"
+    const [name, qty] = splitKRItem(first);
+    const cands = [];
+    if (name && qty){
+      cands.push(`${name} ${qty}`);   // "다이아 300개"
+      cands.push(`${name}${qty}`);    // "다이아300개" (more compact)
+    }
+    if (name) cands.push(name);
+    for (const c of cands){
+      if (c && byteLen(c) <= maxBytes) return c;
+    }
+    return "";
+  }
+
+  function buildRewardSummaryTitle(rewards, lang, maxBytes){
+    const items = buildRewardList(rewards, lang);
     if (items.length === 0) return "";
-
-    const sepOptions = (lang === "KR") ? [" · ", " / ", " + ", ", "] : (lang === "JP") ? ["・", "／", "＋", "、"] : [" · ", " / ", " + ", ", "];
-    const sep = pick(sepOptions);
-
+    if (lang === "KR"){
+      return buildKRTitleRewardShort(rewards, maxBytes) || "";
+    }
+    const sep = (lang === "JP") ? "・" : " · ";
     const full = items.join(sep);
     if (byteLen(full) <= maxBytes) return full;
-
-    // Shorten to "첫 보상 + 외N/他N/+N"
-    const suffix = (() => {
-      if (items.length < 2) return "";
-      const n = items.length - 1;
-      if (lang === "KR") return ` 외 ${n}종`;
-      if (lang === "JP") return ` 他${n}`;
-      return ` +${n}`;
-    })();
-
-    if (items.length >= 2){
-      const cand = items[0] + suffix;
-      if (byteLen(cand) <= maxBytes) return cand;
-
-      // truncate first then suffix
-      const suffixBytes = byteLen(suffix);
-      const firstBudget = Math.max(0, maxBytes - suffixBytes);
-      const t = truncateToBytes(items[0], firstBudget);
-      return t.text + suffix;
-    }
-
-    // single item: truncate
-    return truncateToBytes(items[0], maxBytes).text;
+    return safeTruncate(items[0], maxBytes).text;
   }
 
-  function templatePool(reason, cta, lang){
-    const ctaToken = (() => {
-      if (cta === "none") return "";
-      if (lang === "KR") return (cta === "mailbox") ? "우편함을 확인해 주세요." : "지금 바로 수령해 주세요.";
-      if (lang === "EN") return (cta === "mailbox") ? "Please check your Mailbox." : "Please claim it now.";
-      if (lang === "JP") return (cta === "mailbox") ? "メールをご確認ください。" : "今すぐお受け取りください。";
-      return "";
-    })();
+  function buildRewardSummaryBody(rewards, lang, maxBytes){
+    const items = buildRewardList(rewards, lang);
+    if (items.length === 0) return "";
+    const sepOptions = (lang === "KR") ? [" · ", " / ", ", "] : (lang === "JP") ? ["・", "／", "、"] : [" · ", " / ", ", "];
+    const sep = pick(sepOptions);
+    const full = items.join(sep);
+    if (byteLen(full) <= maxBytes) return full;
+    if (lang === "KR") return chooseKRCandidateBody(items[0], maxBytes);
+    return safeTruncate(items[0], maxBytes).text;
+  }
 
-    const titleBase = {
-      KR: {
-        generic: ["보상이 지급되었어요", "선물이 도착했어요", "보상 지급 안내", "우편함에 보상이 있어요", "보상 수령 안내"],
-        attendance: ["출석 보상이 도착했어요", "오늘의 출석 선물", "출석 보상 지급 안내", "로그인 선물 도착"],
-        event: ["이벤트 보상이 도착했어요", "참여 보상 지급 안내", "이벤트 보상 안내", "이벤트 선물 도착"],
-        maintenance: ["점검 보상이 지급되었어요", "점검 보상 안내", "점검 보상 지급 안내"],
-        apology: ["보상이 지급되었어요", "보상 지급 안내", "불편 보상 안내", "보상 전달 안내"],
-        deadline: ["보상 수령이 곧 종료돼요", "오늘까지 수령 가능해요", "보상 만료가 임박했어요", "수령 기한이 얼마 남지 않았어요"]
-      },
-      EN: {
-        generic: ["Rewards are here", "You've got rewards", "Reward delivery", "Mailbox reward", "Reward notice"],
-        attendance: ["Daily login reward", "Check-in reward", "Today's gift"],
-        event: ["Event reward", "Thanks for joining", "Event gift"],
-        maintenance: ["Maintenance reward", "Compensation notice", "Update reward"],
-        apology: ["Compensation", "Apology reward", "We're sorry"],
-        deadline: ["Claim before it ends", "Ends soon", "Last chance"]
-      },
-      JP: {
-        generic: ["報酬が届きました", "プレゼントがあります", "報酬のご案内", "メールに報酬", "受取のご案内"],
-        attendance: ["ログイン報酬", "出席報酬", "本日のギフト"],
-        event: ["イベント報酬", "参加ありがとうございます", "イベントギフト"],
-        maintenance: ["メンテ報酬", "補填のご案内", "更新報酬"],
-        apology: ["補填", "お詫び報酬", "お詫びのご案内"],
-        deadline: ["期限が近いです", "まもなく終了", "お早めに"]
-      }
-    }[lang][reason] || [];
+  function normalizeKoreanPunct(s){
+    s = normalizeSpaces(s);
+    if (!s) return s;
+    if (!/[!.?]$/.test(s)) s += "!";
+    const parts = s.split(/(?<=[!.?])\s+/);
+    if (parts.length > 2) s = parts.slice(0,2).join(" ");
+    return s;
+  }
 
-    // Title templates (varied but short)
+  // Creativity scoring helpers
+  function tokens(s){
+    return (s || "").replace(/[0-9]/g," ").split(/[^\uAC00-\uD7A3A-Za-z]+/).filter(Boolean).map(x=>x.toLowerCase());
+  }
+  function tokenSet(s){ return new Set(tokens(s)); }
+  function jaccard(a, b){
+    let inter = 0;
+    for (const x of a) if (b.has(x)) inter++;
+    const union = a.size + b.size - inter;
+    return union === 0 ? 0 : inter / union;
+  }
+  function pickLeastUsed(list, usageMap){
+    let best = 1e9;
+    for (const s of list) best = Math.min(best, usageMap.get(s) || 0);
+    const pool = list.filter(s => (usageMap.get(s) || 0) === best);
+    const chosen = pick(pool);
+    usageMap.set(chosen, (usageMap.get(chosen) || 0) + 1);
+    return chosen;
+  }
+
+  function templatePool(lang){
+    const bang = (lang === "KR") ? "!" : "";
     const titleTpl = {
       KR: [
-        "{base}",
-        "{base}: {rewardShort}",
-        "{rewardShort} 지급 안내",
-        "{rewardShort}이(가) 도착했어요"
+        "{rewardShort} 도착!",
+        "{rewardShort} 지급 완료!",
+        "우편함에 {rewardShort}!",
+        "{rewardShort} 받으러 오세요!",
+        "{rewardShort} 선물 도착!",
+        "{rewardShort} 챙기세요!",
+        "깜짝 {rewardShort}!",
+        "{rewardShort} 준비 완료!",
+        "지금 {rewardShort} 수령!",
+        "{rewardShort} 왔어요!",
+        "{rewardShort} 놓치지 마세요!",
+        "우편함 보상 확인!",
+        "{rewardShort}가 기다려요!",
+        "보상 도착 알림!",
+        "{rewardShort} 수령 안내"
       ],
       EN: [
-        "{base}",
-        "{base}: {rewardShort}",
+        "{rewardShort} is here",
         "{rewardShort} delivered",
-        "Get {rewardShort}"
+        "Mailbox reward",
+        "Reward delivered",
+        "Rewards are here",
+        "Gift in your Mailbox",
+        "{rewardShort} ready",
+        "Claim your reward",
+        "Reward waiting",
+        "{rewardShort} available",
+        "A gift for you",
+        "Mailbox gift",
+        "Reward unlocked",
+        "Your reward is ready",
+        "Collect now"
       ],
       JP: [
-        "{base}",
-        "{base}：{rewardShort}",
         "{rewardShort} 配布",
-        "{rewardShort} 受取"
+        "報酬が届きました",
+        "メールに報酬",
+        "受取のご案内",
+        "報酬配布のお知らせ",
+        "メールにギフト",
+        "受取できます",
+        "{rewardShort} 受取",
+        "報酬の準備完了",
+        "ギフト到着",
+        "受け取りましょう",
+        "報酬が待っています",
+        "メールをご確認ください",
+        "受取はこちら",
+        "今すぐ受取"
       ]
     }[lang];
 
-    // Body templates (polite KR; avoid repeating mailbox in suffix)
-    const bodyTpl = {
-      KR: [
-        "{rewardLong}이(가) 지급되었어요. 지금 우편함에서 확인해 주세요.",
-        "{rewardLong} 지급이 완료되었어요. 우편함에서 수령해 주세요.",
-        "우편함에 {rewardLong}이(가) 도착했어요. 확인해 주세요.",
-        "{rewardLong}이(가) 준비되어 있어요. 우편함에서 받아 주세요.",
-        "{rewardLong} 지급 안내입니다. 우편함에서 확인해 주세요."
-      ],
-      EN: [
-        "{rewardLong} has been sent. Please check your Mailbox.",
-        "Mailbox reward: {rewardLong}.",
-        "Rewards delivered: {rewardLong}. Please check your Mailbox.",
-        "{rewardLong} is waiting in your Mailbox.",
-        "You can claim {rewardLong} from your Mailbox."
-      ],
-      JP: [
-        "{rewardLong} を配布しました。メールをご確認ください。",
-        "メールに {rewardLong} をお届けしました。",
-        "報酬：{rewardLong}。メールで受け取れます。",
-        "{rewardLong} はメールに届いています。",
-        "メールから {rewardLong} をお受け取りください。"
-      ]
-    }[lang];
+    const actionKRPlain = [
+      "우편함에서 확인해 주세요!",
+      "우편함에서 받아 주세요!",
+      "우편함에서 바로 수령해 주세요!",
+      "지금 우편함에서 확인해 주세요!",
+      "지금 바로 우편함에서 받아 주세요!",
+      "우편함을 열어 확인해 주세요!",
+      "우편함에서 챙겨 주세요!",
+      "바로 수령해 주세요!",
+      "지금 확인하고 받아가세요!",
+      "지금 바로 받아가세요!",
+      "놓치지 말고 받아 주세요!",
+      "놓치기 전에 받아 주세요!",
+      "우편함에서 선물 확인해 주세요!",
+      "우편함에서 보상 챙겨 주세요!",
+      "지금 접속해서 우편함을 확인해 주세요!",
+      "접속해서 보상을 수령해 주세요!",
+      "우편함 확인 후 바로 시작해요!",
+      "우편함에서 받고 바로 출발해요!"
+    ];
 
-    // Optional suffixes (no mailbox words to avoid repetition)
-    const suffixes = {
-      KR: ["", " 놓치지 마세요.", "지금 확인하시면 돼요.", "바로 확인해 주세요."],
-      EN: ["", " Don't miss it.", " Please take a look.", " It's ready now."],
-      JP: ["", " お見逃しなく。", " 今ご確認ください。", " すぐ受け取れます。"]
-    }[lang];
+    const actionKRWith = [
+      "우편함을 열어 {rewardObj} 확인해 주세요!",
+      "우편함에서 {rewardObj} 받아 주세요!",
+      "우편함에서 {rewardObj} 바로 수령해 주세요!",
+      "지금 우편함에서 {rewardObj} 확인해 주세요!",
+      "지금 바로 우편함에서 {rewardObj} 받아 주세요!",
+      "우편함에서 {rewardObj} 챙겨 주세요!",
+      "놓치지 말고 {rewardObj} 받아 주세요!",
+      "놓치기 전에 {rewardObj} 수령해 주세요!",
+      "접속해서 우편함에서 {rewardObj} 받아 주세요!",
+      "지금 접속해서 {rewardObj} 챙겨 주세요!",
+      "우편함에서 {rewardObj} 받고 출발해요!",
+      "우편함에서 {rewardObj} 받고 전투 준비해요!"
+    ];
+    const flavorKR = [
+      "오늘도 힘찬 하루 되세요!",
+      "즐거운 모험이 기다려요!",
+      "득템한 기분으로 출발해요!",
+      "강화/성장에 알차게 써보세요!",
+      "행운이 함께하길 바랄게요!",
+      "오늘도 승리하세요!",
+      "좋은 소식만 가득하길!",
+      "오늘 플레이도 파이팅!",
+      "재미있게 즐겨주세요!",
+      "오늘도 즐겁게 플레이해요!",
+      "전투 준비 완료!",
+      "모험에 도움이 되길 바라요!",
+      "장비 세팅하고 떠나볼까요?!",
+      "지금이 기회예요!",
+      "바로 쓰면 더 좋아요!",
+      "기분 좋은 선물이에요!",
+      "오늘도 응원할게요!",
+      "출발 준비되셨나요?!",
+      "잠깐 들러 선물만 챙겨도 좋아요!",
+      "받고 더 신나게 즐겨요!"
+    ];
 
-    return { titleBase, titleTpl, bodyTpl, suffixes, ctaToken };
+    // No parentheses (push-like KR)
+    const bodyLine1KR = [
+      // Arrival / delivery
+      "우편함에 {rewardSubj} 들어왔어요{bang}",
+      "우편함에 {rewardSubj} 도착했어요{bang}",
+      "{rewardSubj}가 우편함에 도착했어요{bang}",
+      "{rewardRaw} 우편함에 도착했어요{bang}",
+      "선물이 도착했어요{bang} {rewardRaw}",
+      "깜짝 선물 도착{bang} {rewardRaw}",
+      "기분 좋은 선물이 왔어요{bang} {rewardRaw}",
+      // Completion / ready
+      "{rewardRaw} 지급 완료{bang}",
+      "{rewardRaw} 지급됐어요{bang}",
+      "보상이 지급됐어요{bang} {rewardRaw}",
+      "보상이 준비됐어요{bang} {rewardRaw}",
+      "{rewardRaw} 준비 완료{bang}",
+      "우편함에 보상이 있어요{bang} {rewardRaw}",
+      "우편함에 선물이 있어요{bang} {rewardRaw}",
+      // Invitation / narrative
+      "전령이 선물을 두고 갔어요{bang}",
+      "오늘의 선물 도착{bang}",
+      "작은 응원 선물이에요{bang}",
+      "모험에 도움이 될 선물이에요{bang}",
+      "출발 전에 선물부터 챙겨요{bang}",
+      "접속 선물 도착{bang} {rewardRaw}",
+      "{rewardRaw} 드릴게요{bang} 우편함을 확인해 주세요",
+      "{rewardRaw} 챙겨두세요{bang} 우편함에서 확인해 주세요"
+    ];
+    const bodyLine2KR = [
+      // Action + flavor combos
+      "{action}",
+      "{action} {flavor}",
+      "{flavor}",
+      // Strong CTAs (varied)
+      "우편함에서 {rewardObj} 받고 바로 출발해요!",
+      "우편함에서 {rewardObj} 받고 모험을 시작해요!",
+      "우편함에서 {rewardObj} 받고 전투 준비해요!",
+      "우편함에서 {rewardObj} 받고 강화해 볼까요?!",
+      "우편함에서 {rewardObj} 받고 성장하러 가요!",
+      "지금 {rewardObj} 받고 바로 떠나볼까요?!",
+      "지금 {rewardObj} 챙기고 출발해요!",
+      "지금 접속해서 {rewardObj} 챙겨요!",
+      "접속해서 {rewardObj} 먼저 받아 주세요!",
+      "선물 받고 오늘도 신나게 출발해요!",
+      "받고 바로 장비 세팅해 볼까요?!",
+      "받고 바로 전투 준비 완료!",
+      "받고 바로 모험으로 출발해요!",
+      "받고 든든하게 플레이해요!",
+      "받고 더 재밌게 즐겨요!",
+      // Softer closings
+      "{rewardObj}로 오늘도 힘내요!",
+      "{rewardObj} 받고 즐거운 하루 보내세요!",
+      "{rewardObj} 받고 오늘도 즐겁게 플레이해요!",
+      "{rewardObj} 받고 기분 좋게 시작해요!",
+      "{rewardObj} 받고 좋은 하루 되세요!"
+    ];
+
+    const enBody = [
+      "{rewardLong} has been sent. Please check your Mailbox.",
+      "{rewardLong} is waiting in your Mailbox.",
+      "Mailbox gift: {rewardLong}. Collect it now.",
+      "You can claim {rewardLong} from your Mailbox.",
+      "A gift is in your Mailbox: {rewardLong}.",
+      "{rewardLong} is ready—open your Mailbox to collect.",
+      "Your reward is ready. Claim {rewardLong} in your Mailbox.",
+      "Reward delivered! {rewardLong} is in your Mailbox.",
+      "Quick pickup: {rewardLong} is in your Mailbox.",
+      "Don’t miss it—{rewardLong} is waiting in your Mailbox."
+    ];
+    const jpBody = [
+      "{rewardLong} を配布しました。メールをご確認ください。",
+      "メールに {rewardLong} をお届けしました。",
+      "{rewardLong} はメールに届いています。",
+      "メールから {rewardLong} をお受け取りください。",
+      "{rewardLong} を受け取れます。メールをご確認ください。",
+      "報酬を配布しました。メールで {rewardLong} を受け取ってください。",
+      "{rewardLong} をメールにお入れしました。今すぐ受け取りましょう。",
+      "ギフト到着！メールで {rewardLong} を受け取ってください。",
+      "{rewardLong} が待っています。メールをご確認ください。",
+      "受取忘れにご注意ください。メールに {rewardLong} があります。"
+    ];
+
+    const bodyTpl = (lang === "KR") ? { actionKRPlain, actionKRWith, flavorKR, bodyLine1KR, bodyLine2KR } : (lang==="EN" ? enBody : jpBody);
+    return { titleTpl, bodyTpl, bang };
   }
 
   function formatTpl(tpl, vars){
     return tpl
-      .replaceAll("{base}", vars.base ?? "")
       .replaceAll("{rewardShort}", vars.rewardShort ?? "")
-      .replaceAll("{rewardLong}", vars.rewardLong ?? "");
+      .replaceAll("{rewardLong}", vars.rewardLong ?? "")
+      .replaceAll("{rewardRaw}", vars.rewardRaw ?? "")
+      .replaceAll("{rewardSubj}", vars.rewardSubj ?? "")
+      .replaceAll("{rewardObj}", vars.rewardObj ?? "")
+      .replaceAll("{rewardTopic}", vars.rewardTopic ?? "")
+      .replaceAll("{bang}", vars.bang ?? "")
+      .replaceAll("{action}", vars.action ?? "")
+      .replaceAll("{flavor}", vars.flavor ?? "");
   }
 
-  // Fit helper: remove optional pieces before hard truncate.
   function fitText(buildSteps, maxBytes){
     for (const fn of buildSteps){
-      const s = fn();
+      const s = normalizeSpaces(fn());
       if (byteLen(s) <= maxBytes) return { text:s, truncated:false };
     }
-    const s = buildSteps[0]();
-    const t = truncateToBytes(s, maxBytes);
+    const s = normalizeSpaces(buildSteps[0]());
+    const t = safeTruncate(s, maxBytes);
     return { text:t.text, truncated:true };
   }
 
-  function generateOne(rewards, reason, cta, lang){
-    const pool = templatePool(reason, cta, lang);
-    const base = pick(pool.titleBase);
-    const titleTpl = pick(pool.titleTpl);
-    const bodyTpl = pick(pool.bodyTpl);
-    const suffix = pick(pool.suffixes);
+  // KR body: never truncate mid-sentence. Try richer -> simpler candidates that fit within 100B.
+  function buildKRBody(rewards, pool, state){
+    const b = pool.bodyTpl;
 
-    // Reward strings
-    const wantsRewardInTitle = titleTpl.includes("{rewardShort}");
-    let rewardShort = "";
-    if (wantsRewardInTitle){
-      // conservative budget for title reward
-      const skeleton = formatTpl(titleTpl, { base, rewardShort:"" }).replace(/\s+/g," ").trim();
-      const overhead = byteLen(skeleton);
-      const budget = Math.max(0, TITLE_MAX - overhead - 1);
-      rewardShort = buildRewardSummary(rewards, lang, budget);
+    // Per-click memory to avoid repeating the same vibe
+    window.__kr_history = window.__kr_history || [];
+    const hist = window.__kr_history.slice(-12).map(x => tokenSet(x));
+
+    const recentText = window.__kr_history.slice(-6).join(" \n");
+    function tailKey(s){
+      const t = (s||"").trim();
+      // Use last clause as a "catchphrase" key
+      const m = t.match(/([^.!?！？。]+)[.!?！？。]?\s*$/);
+      return (m?m[1]:t).replace(/\s+/g," ").slice(-18);
     }
 
-    const titleSteps = [
-      () => formatTpl(titleTpl, { base, rewardShort }).replace(/\s+/g," ").trim(),
-      () => base,
+    const cooldownPatterns = [
+      /모험하러\s*오세요/,
+      /보상\s*받고\s*출발해요/,
+      /보상\s*챙기고\s*모험/,
+      /지금\s*접속해서\s*모험/,
+      /바로\s*전투\s*준비/,
+      /우편함에서\s*.*받고\s*바로\s*출발/,
     ];
-    const titleRes = fitText(titleSteps, TITLE_MAX);
 
-    // Body: stepwise (with suffix and CTA if not already implied)
-    const baseBodySkeleton = formatTpl(bodyTpl, { rewardLong:"" });
 
-    function buildBody({useSuffix, useCta, rewardAggressive}){
-      const tailSuffix = useSuffix ? suffix : "";
-      let ctaToken = (useCta ? pool.ctaToken : "");
+    // Phrase cooldown (avoid repeating same catchy line)
+    window.__kr_phrase = window.__kr_phrase || {};
+    window.__kr_tail = window.__kr_tail || [];
+    const phraseMem = window.__kr_phrase;
+    const bumpPhrase = (key) => { phraseMem[key] = (phraseMem[key] || 0) + 1; };
+    const phrasePenalty = (s) => {
+      let p = 0;
+      const keys = [
+        {k:"한판", r:/한\s*판\s*가볼까요\?/},
+        {k:"모험", r:/모험\s*을\s*떠나볼까요\?/},
+        {k:"출발", r:/바로\s*출발해요/},
+        {k:"접속", r:/지금\s*바로\s*접속/}
+      ];
+      for (const it of keys){
+        if (it.r.test(s)){
+          const c = phraseMem[it.k] || 0;
+          // Stronger penalty for '한 판'
+          p += (it.k === "한판") ? (4 + c * 2.2) : (1.2 + c * 0.6);
+        }
+      }
+      return p;
+    };
+    const flavor = pickLeastUsed(b.flavorKR, state.flavorUsage);
 
-      // Avoid repeating mailbox CTA if body already contains mailbox word.
-      const bodyPreview = baseBodySkeleton + tailSuffix;
-      if (ctaToken && containsMailbox(bodyPreview, lang) && cta === "mailbox"){
-        ctaToken = ""; // already instructs mailbox
+    const clean = (s) => {
+      s = (s || "").replace(/\(.*?\)/g, "");         // no parentheses
+      s = s.replace(/(지금\s+){2,}/g, "지금 ");        // collapse repeated "지금"
+      s = s.replace(/\s{2,}/g, " ");
+
+      // Mid-sentence punctuation polish (KR)
+      // e.g., "깜짝 선물 도착 다이아" -> "깜짝 선물 도착! 다이아"
+      s = s.replace(/(깜짝\s*선물\s*도착)(\s+)(?=[^!.?！？」])/g, "$1! ");
+      s = s.replace(/(지급\s*완료)(\s+)(?=[^!.?！？」])/g, "$1! ");
+      s = s.replace(/(선물이\s*도착했어요)(\s+)(?=[^!.?！？」])/g, "$1! ");
+      s = s.replace(/(우편함에\s*선물이\s*있어요)(\s+)(?=[^!.?！？」])/g, "$1! ");
+
+      // Avoid question-like punctuation for statements
+      s = s.replace(/\?!/g, "!");
+      s = s.replace(/완료\?+/g, "완료");
+      s = normalizeKoreanPunct(s);
+      return s;
+    };
+
+    // Budget rewardRaw
+    const previewNoReward = normalizeSpaces(formatTpl(pick(b.bodyLine1KR) + " " + pick(b.bodyLine2KR), {
+      rewardRaw:"", rewardSubj:"", rewardObj:"", rewardTopic:"",
+      action:pick(b.actionKRPlain), flavor, bang:pool.bang
+    }));
+    let budgetRaw = Math.max(0, BODY_MAX - byteLen(previewNoReward) - 2);
+    let rewardRaw = buildRewardSummaryBody(rewards, "KR", budgetRaw);
+    if (!rewardRaw){
+      const first = (rewards && rewards.length) ? `${rewards[0].kr || ""} ${rewards[0].qty || ""}`.trim() : "";
+      rewardRaw = chooseKRCandidateBody(first, budgetRaw) || "보상";
+    }
+
+    const rewardSubj = attachParticle(rewardRaw, "subj");
+    const rewardObj  = attachParticle(rewardRaw, "obj");
+    const rewardTopic= attachParticle(rewardRaw, "topic");
+
+    // Must include the first reward name somewhere (avoid only "보상")
+    const firstName = (rewards && rewards.length) ? nvl(rewards[0].kr) : "";
+    const mustName = firstName || "";
+
+    let best = "";
+    let bestScore = -1e9;
+    const candidates = [];
+
+    for (let i=0; i<180; i++){
+      const line1Tpl = pick(b.bodyLine1KR).replace(/\b보상 준비됐어요\b/g, "보상이 준비됐어요");
+      const line2Tpl = pick(b.bodyLine2KR);
+
+      const hasRewardInLine1 = /\{reward/.test(line1Tpl);
+      const actionTpl = hasRewardInLine1
+        ? pickLeastUsed(b.actionKRPlain, state.actionUsage)
+        : pickLeastUsed(b.actionKRWith,  state.actionUsage);
+      const action = normalizeSpaces(formatTpl(actionTpl, { rewardRaw, rewardSubj, rewardObj, rewardTopic, bang:pool.bang }));
+      const s0 = formatTpl(line1Tpl + " " + line2Tpl, {
+        rewardRaw, rewardSubj, rewardObj, rewardTopic, action, flavor, bang:pool.bang
+      });
+      const s = clean(s0);
+
+      if (!s) continue;
+      if (byteLen(s) > BODY_MAX) continue;
+
+      // Must mention mailbox somewhere
+      if (!s.includes("우편함")) continue;
+      // Cooldown: avoid repeating catchy tails across recent outputs
+      if (cooldownPatterns && cooldownPatterns.some(r => r.test(s) && r.test(recentText))) continue;
+      const tk = tailKey(s);
+      if (window.__kr_tail.slice(-6).includes(tk)) continue;
+      if (/오늘도\s*신나게\s*즐겨/.test(s) && /오늘도\s*신나게\s*즐겨/.test(recentText)) continue;
+      if (/한\s*판\s*가볼까요/.test(s) && /한\s*판\s*가볼까요/.test(recentText)) continue;
+
+      // Prefer explicitly mentioning reward name (not just "보상")
+      if (mustName && !s.includes(mustName)) continue;
+
+      const set = tokenSet(s);
+      let sim = 0;
+      for (const h of hist) sim += jaccard(set, h);
+      sim = sim / Math.max(1, hist.length);
+
+      // Penalize overly-generic "보상" usage
+      const generic = (s.match(/보상/g) || []).length;
+      const genericPenalty = generic >= 2 ? 2.0 : (generic === 1 ? 0.8 : 0.0);
+
+      // Reward mention bonus (include qty)
+      const qtyBonus = /\d/.test(s) ? 1.2 : 0.0;
+      const rarePenalty = /모험에\s*도움이\s*되는\s*선물/.test(s) ? 3.0 : 0.0;
+      const onepanPenalty = /(한\s*판)/.test(s) ? 2.5 : 0.0;
+      const funPenalty = /오늘도\s*신나게\s*즐겨/.test(s) ? 3.0 : 0.0;
+      const adventurePenalty = /(모험하러\s*오세요|보상\s*챙기고\s*모험|지금\s*접속해서\s*모험)/.test(s) ? 2.2 : 0.0;
+
+      const punct = (s.match(/[!.?]/g) || []).length;
+      const score = set.size - sim * 14 - genericPenalty * 3 + punct * 0.6 + qtyBonus - phrasePenalty(s) - rarePenalty - onepanPenalty - funPenalty - adventurePenalty;
+
+      candidates.push({s, score});
+
+      if (score > bestScore){
+        bestScore = score;
+        best = s;
+      }
+    }
+
+    if (candidates.length){
+      // Pick from top candidates with weighted randomness to avoid one template dominating
+      candidates.sort((a,b)=>b.score-a.score);
+      const top = candidates.slice(0, 8);
+      const weights = top.map(x => Math.exp(x.score/8));
+      const sum = weights.reduce((a,b)=>a+b,0);
+      let r = Math.random()*sum;
+      let chosen = top[0].s;
+      for (let i=0;i<top.length;i++){
+        r -= weights[i];
+        if (r<=0){ chosen = top[i].s; break; }
+      }
+      best = chosen;
+    }
+
+    if (best){
+      window.__kr_history.push(best);
+      window.__kr_tail.push(tailKey(best));
+      // update phrase memory
+      if (/한\s*판\s*가볼까요\?/.test(best)) bumpPhrase("한판");
+      if (/모험\s*을\s*떠나볼까요\?/.test(best)) bumpPhrase("모험");
+      if (/바로\s*출발해요/.test(best)) bumpPhrase("출발");
+      if (/지금\s*바로\s*접속/.test(best)) bumpPhrase("접속");
+      if (/오늘도\s*신나게\s*즐겨/.test(best)) bumpPhrase("신나게");
+      return best;
+    }
+    return "";
+  }
+  function generateOne(rewards, lang, state){
+    const pool = templatePool(lang);
+
+    // ----- TITLE -----
+    let titleTpl = pick(pool.titleTpl);
+    let rewardShort = "";
+
+    if (lang === "KR"){
+      const budget = budgetForRewardShort(titleTpl);
+      rewardShort = buildRewardSummaryTitle(rewards, "KR", budget);
+      if (!rewardShort) return null; // must have intact reward name
+
+      const firstName = (rewards && rewards.length) ? nvl(rewards[0].kr) : "";
+      if (firstName && !rewardShort.includes(firstName)) return null;
+
+      // If qty exists and can fit with the name, prefer a rewardShort that includes qty.
+      const firstQty = (rewards && rewards.length) ? nvl(rewards[0].qty) : "";
+      if (firstName && firstQty){
+        const want1 = `${firstName} ${firstQty}`;
+        const want2 = `${firstName}${firstQty}`;
+        if (byteLen(want1) <= budget) rewardShort = want1;
+        else if (byteLen(want2) <= budget) rewardShort = want2;
+      }
+    } else {
+      // For EN/JP allow empty rewardShort (generic titles) but prefer rewardShort when possible
+      const budget = budgetForRewardShort(titleTpl);
+      rewardShort = buildRewardSummaryTitle(rewards, lang, budget);
+    }
+
+    const titleRes = fitText([() => formatTpl(titleTpl, { rewardShort })], TITLE_MAX);
+    if (lang === "KR" && (titleRes.truncated || /[\.]{3,}|…/.test(titleRes.text))) return null; // KR title must never be cut
+    if (lang !== "KR" && hasHangul(titleRes.text)) return null;
+
+    // ----- BODY -----
+    function buildBody(){
+      if (lang !== "KR"){
+        const tpl = pick(pool.bodyTpl);
+        const previewNoReward = normalizeSpaces(formatTpl(tpl, { rewardLong:"" }));
+        const budgetB = Math.max(0, BODY_MAX - byteLen(previewNoReward));
+        const rewardLong = buildRewardSummaryBody(rewards, lang, budgetB) || (lang==="EN" ? "Rewards" : "報酬");
+        let s = normalizeSpaces(formatTpl(tpl, { rewardLong }));
+        if (hasHangul(s)) return "";
+        return (byteLen(s) <= BODY_MAX) ? s : safeTruncate(s, BODY_MAX).text;
       }
 
-      const overhead = byteLen(baseBodySkeleton) + byteLen(tailSuffix) + (ctaToken ? (1 + byteLen(ctaToken)) : 0);
-      const budget = Math.max(0, BODY_MAX - overhead);
-      const rewardLong = buildRewardSummary(rewards, lang, budget);
-
-      let s = formatTpl(bodyTpl, { rewardLong });
-      if (tailSuffix) s += tailSuffix;
-      if (ctaToken) s += " " + ctaToken;
-      return s.replace(/\s+/g," ").trim();
+      // KR: never truncate; resample if it doesn't fit naturally.
+      return buildKRBody(rewards, pool, state);
     }
 
-    const bodySteps = [
-      () => buildBody({useSuffix:true, useCta:true}),
-      () => buildBody({useSuffix:true, useCta:false}),
-      () => buildBody({useSuffix:false, useCta:true}),
-      () => buildBody({useSuffix:false, useCta:false}),
-    ];
-    const bodyRes = fitText(bodySteps, BODY_MAX);
+    const bodyRes = fitText([buildBody], BODY_MAX);
+    if (!bodyRes.text) return null;
+    if (lang === "KR" && bodyRes.truncated) return null; // avoid mid-sentence cut in KR
+
+    // KR must include reward name in title or body
+    if (lang === "KR"){
+      const firstName = (rewards && rewards.length) ? nvl(rewards[0].kr) : "";
+      if (firstName && !(titleRes.text.includes(firstName) || bodyRes.text.includes(firstName))) return null;
+    }
+    if (lang !== "KR" && (hasHangul(bodyRes.text) || hasHangul(titleRes.text))) return null;
 
     return {
-      lang,
-      title: titleRes.text,
-      body: bodyRes.text,
-      titleBytes: byteLen(titleRes.text),
-      bodyBytes: byteLen(bodyRes.text),
-      titleTruncated: titleRes.truncated,
-      bodyTruncated: bodyRes.truncated
+      lang, title: titleRes.text, body: bodyRes.text,
+      titleBytes: byteLen(titleRes.text), bodyBytes: byteLen(bodyRes.text),
+      titleTruncated: titleRes.truncated, bodyTruncated: bodyRes.truncated
     };
   }
 
-  function generateVariants(rewards, reason, cta, lang, count){
-    // Generate plenty and keep unique (title||body). If not enough unique, returns what it can.
-    const tries = Math.max(80, count * 30);
-    const seen = new Set();
-    const out = [];
-    for (let i=0; i<tries && out.length < count; i++){
-      const o = generateOne(rewards, reason, cta, lang);
-      const key = o.title + "||" + o.body;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(o);
-    }
-    return out;
+  function fallbackKR(rewards){
+    const first = (rewards && rewards.length) ? `${rewards[0].kr || ""} ${rewards[0].qty || ""}`.trim() : "보상";
+    const baseTpl = "{rewardShort} 도착!";
+    const budget = budgetForRewardShort(baseTpl);
+    const rewardShort = chooseKRCandidateTitle(first, budget) || (rewards[0]?.kr || "보상");
+    const title = normalizeSpaces(baseTpl.replaceAll("{rewardShort}", rewardShort));
+    const body = normalizeKoreanPunct(`${attachParticle(first, "subj")} 우편함에 지급됐어요! 지금 바로 확인해 주세요!`);
+    return { lang:"KR", title, body, titleBytes:byteLen(title), bodyBytes:byteLen(body), titleTruncated:false, bodyTruncated:false };
   }
 
-  // UI
+  function generateBest(rewards, lang){
+    const sampleN = (lang === "KR") ? 900 : 220;
+    const state = { actionUsage:new Map(), flavorUsage:new Map() };
+    const candidates = [];
+    for (let i=0; i<sampleN; i++){
+      const o = generateOne(rewards, lang, state);
+      if (!o) continue;
+      if (candidates.some(c => c.title === o.title && c.body === o.body)) continue;
+      candidates.push(o);
+      if (candidates.length >= 40) break;
+    }
+    if (!candidates.length){
+      if (lang === "KR") return fallbackKR(rewards);
+      return { lang, title:"", body:"", titleBytes:0, bodyBytes:0, titleTruncated:false, bodyTruncated:false };
+    }
+
+    const sets = candidates.map(c => tokenSet(c.title + " " + c.body));
+    const scores = candidates.map((c, idx) => {
+      const size = sets[idx].size;
+      let sim = 0;
+      for (let j=0; j<sets.length; j++){ if (j!==idx) sim += jaccard(sets[idx], sets[j]); }
+      sim = sim / Math.max(1, sets.length-1);
+      let score = size - sim * 10;
+      if (lang === "KR"){
+        const punct = (c.body.match(/[!.?]/g) || []).length;
+        if (punct >= 2) score += 1.5;
+        if (/\d/.test(c.title)) score += 1;
+      }
+      return score;
+    });
+    let best = 0;
+    for (let i=1; i<scores.length; i++) if (scores[i] > scores[best]) best = i;
+    return candidates[best];
+  }
+
+  // ---------- UI ----------
   const tbody = document.getElementById("rewardTbody");
   const outBox = document.getElementById("outBox");
 
@@ -431,16 +856,12 @@
 
   function makeRow(data = { kr:"", qty:"", en:"", jp:"" }){
     const tr = document.createElement("tr");
-
     const tdKR = document.createElement("td");
     tdKR.innerHTML = `<input placeholder="예) 다이아" value="${escapeHtml(data.kr)}" data-field="kr">`;
-
     const tdQty = document.createElement("td");
     tdQty.innerHTML = `<input placeholder="예) 300개 / 10장" value="${escapeHtml(data.qty)}" data-field="qty">`;
-
     const tdEN = document.createElement("td");
     tdEN.innerHTML = `<input placeholder="예) Gems" value="${escapeHtml(data.en)}" data-field="en">`;
-
     const tdJP = document.createElement("td");
     tdJP.innerHTML = `<input placeholder="예) ジェム" value="${escapeHtml(data.jp)}" data-field="jp">`;
 
@@ -475,22 +896,20 @@
     return `<span class="${cls}">${bytes}/${max}B${t}</span>`;
   }
 
-  function renderVariant(o, idx){
-    const idT = `t_${o.lang}_${idx}`;
-    const idB = `b_${o.lang}_${idx}`;
-
+  function renderVariant(o){
+    const idT = `t_${o.lang}_0`;
+    const idB = `b_${o.lang}_0`;
     const div = document.createElement("div");
     div.className = "variant";
     div.innerHTML = `
       <div class="variantTop">
-        <div class="tag">#${idx+1} · 제목 ${statusPill(o.titleBytes, TITLE_MAX, o.titleTruncated)} · 본문 ${statusPill(o.bodyBytes, BODY_MAX, o.bodyTruncated)}</div>
+        <div class="tag">제목 ${statusPill(o.titleBytes, TITLE_MAX, o.titleTruncated)} · 본문 ${statusPill(o.bodyBytes, BODY_MAX, o.bodyTruncated)}</div>
         <div class="copyRow">
           <button class="btn" data-copy="${idT}">제목 복사</button>
           <button class="btn" data-copy="${idB}">본문 복사</button>
-          <button class="btn" data-copy-both="${o.lang}::${idx}">제목+본문</button>
+          <button class="btn" data-copy-both="${o.lang}">제목+본문</button>
         </div>
       </div>
-
       <div class="kv">
         <div class="k">제목</div>
         <div class="v"><input readonly id="${idT}" value="${escapeHtml(o.title)}"></div>
@@ -512,9 +931,9 @@
 
     div.querySelectorAll("button[data-copy-both]").forEach(btn => {
       btn.addEventListener("click", async () => {
-        const [lang, idxStr] = btn.getAttribute("data-copy-both").split("::");
-        const t = document.getElementById(`t_${lang}_${idxStr}`).value;
-        const b = document.getElementById(`b_${lang}_${idxStr}`).value;
+        const lang = btn.getAttribute("data-copy-both");
+        const t = document.getElementById(`t_${lang}_0`).value;
+        const b = document.getElementById(`b_${lang}_0`).value;
         await navigator.clipboard.writeText(`Title: ${t}\nBody: ${b}`);
         const old = btn.textContent;
         btn.textContent = "복사됨";
@@ -525,54 +944,39 @@
     return div;
   }
 
-  function renderLangBlock(lang, variants){
+  function renderLangBlock(lang, o){
     const card = document.createElement("div");
     card.className = "outCard";
-
     card.innerHTML = `
       <div class="outHead">
         <div class="lang">${lang}</div>
-        <div class="pill">랜덤 후보 ${variants.length}개</div>
+        <div class="pill">랜덤 결과 1개</div>
       </div>
       <div class="v" id="list_${lang}"></div>
     `;
-
-    const list = card.querySelector(`#list_${lang}`);
-    variants.forEach((v, i) => list.appendChild(renderVariant(v, i)));
+    card.querySelector(`#list_${lang}`).appendChild(renderVariant(o));
     return card;
   }
 
   function render(){
     const rewards = collectRewards();
-    const reason = document.getElementById("reason").value;
-    const cta = document.getElementById("cta").value;
-    const count = parseInt(document.getElementById("count").value, 10);
-
     const langs = ["KR","EN","JP"];
     outBox.innerHTML = "";
     langs.forEach(lang => {
-      const variants = generateVariants(rewards, reason, cta, lang, count);
-      outBox.appendChild(renderLangBlock(lang, variants));
+      const best = generateBest(rewards, lang);
+      outBox.appendChild(renderLangBlock(lang, best));
     });
   }
 
-  document.getElementById("addRowBtn").addEventListener("click", () => {
-    tbody.appendChild(makeRow());
-  });
-
+  document.getElementById("addRowBtn").addEventListener("click", () => tbody.appendChild(makeRow()));
   document.getElementById("generateBtn").addEventListener("click", render);
-
   document.getElementById("resetBtn").addEventListener("click", () => {
     tbody.innerHTML = "";
     tbody.appendChild(makeRow({ kr:"다이아", qty:"300개", en:"Gems", jp:"ジェム" }));
     tbody.appendChild(makeRow({ kr:"소환권", qty:"10장", en:"Summon Ticket", jp:"召喚チケット" }));
-    document.getElementById("reason").value = "generic";
-    document.getElementById("cta").value = "mailbox";
-    document.getElementById("count").value = "5";
     render();
   });
 
-  // bootstrap
   tbody.appendChild(makeRow({ kr:"다이아", qty:"300개", en:"Gems", jp:"ジェム" }));
   render();
 </script>
