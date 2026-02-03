@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PUSH 메시지 생성기 (제목 25B / 본문 100B)</title>
+  <style>
+    :root { --bg:#0b0f14; --card:#121826; --muted:#9aa4b2; --text:#e6edf3; --line:#233046; --accent:#6ee7ff; --danger:#ff6b6b; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans KR", Arial, sans-serif; background:var(--bg); color:var(--text); }
+    .wrap { max-width:1150px; margin:0 auto; padding:24px; }
+    h1 { font-size:18px; margin:0 0 6px; }
+    .sub { color:var(--muted); font-size:13px; margin-bottom:18px; line-height:1.45; }
+    .grid { display:grid; grid-template-columns: 1.15fr 1fr; gap:16px; align-items:start; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    label { font-size:12px; color:var(--muted); display:block; margin-bottom:6px; }
+    input, select { width:100%; padding:10px 12px; border-radius:12px; border:1px solid var(--line); background:#0d1422; color:var(--text); outline:none; }
+    input:focus, select:focus { border-color: rgba(110,231,255,.55); box-shadow: 0 0 0 3px rgba(110,231,255,.12); }
+    .btn { cursor:pointer; border:none; border-radius:12px; padding:10px 12px; background:#0d1422; color:var(--text); border:1px solid var(--line); }
+    .btn.primary { background: rgba(110,231,255,.12); border-color: rgba(110,231,255,.35); }
+    .btn:hover { filter: brightness(1.08); }
+    .btn.danger { border-color: rgba(255,107,107,.35); background: rgba(255,107,107,.10); }
+    .table { width:100%; border-collapse: separate; border-spacing:0 10px; }
+    .table th { text-align:left; font-size:12px; color:var(--muted); font-weight:600; padding:0 8px; }
+    .table td { padding:0 8px; vertical-align:top; }
+    .mini { font-size:12px; color:var(--muted); }
+    .pill { display:inline-flex; gap:8px; align-items:center; padding:6px 10px; border-radius:999px; border:1px solid var(--line); background:#0d1422; font-size:12px; color:var(--muted); }
+    .ok { color: var(--accent); }
+    .bad { color: var(--danger); }
+    .outBox { display:grid; gap:12px; }
+    .outCard { border:1px solid var(--line); border-radius:14px; padding:12px; background:#0d1422; }
+    .outHead { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
+    .lang { font-weight:800; font-size:13px; }
+    .kv { display:grid; grid-template-columns: 72px 1fr; gap:10px; align-items:start; }
+    .k { color:var(--muted); font-size:12px; padding-top:10px; }
+    .v { display:grid; gap:8px; }
+    .hint { font-size:12px; color:var(--muted); line-height:1.5; }
+    .variant { border:1px solid rgba(255,255,255,.06); border-radius:12px; padding:10px; display:grid; gap:8px; }
+    .variantTop { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+    .tag { font-size:11px; color:var(--muted); }
+    .copyRow { display:flex; gap:8px; flex-wrap:wrap; }
+    .footer { margin-top:14px; font-size:12px; color:var(--muted); line-height:1.45; }
+    @media (max-width: 980px) { .grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>PUSH 메시지 생성기 <span class="mini">(제목 25 byte · 본문 100 byte · 기본: 우편함 지급)</span></h1>
+    <div class="sub">
+      보상(명칭/수량)을 입력하고 <b>생성</b>을 누르면, 매번 랜덤한 표현으로 KR/EN/JP 푸시 문구를 생성합니다.<br/>
+      <b>중복 문구는 자동으로 제외</b>하고, byte 제한을 넘으면 <b>자연스럽게 축약</b>합니다.
+    </div>
+
+    <div class="grid">
+      <!-- INPUT -->
+      <div class="card">
+        <div class="row" style="justify-content:space-between; margin-bottom:10px;">
+          <div class="pill">제목 <b>25B</b> · 본문 <b>100B</b> · 전달 <b>우편함</b></div>
+          <div class="row">
+            <button class="btn" id="addRowBtn">+ 보상 추가</button>
+            <button class="btn danger" id="resetBtn">초기화</button>
+          </div>
+        </div>
+
+        <div class="row" style="gap:12px; margin-bottom:12px;">
+          <div style="flex:1; min-width:190px;">
+            <label>사유</label>
+            <select id="reason">
+              <option value="generic">일반</option>
+              <option value="attendance">출석</option>
+              <option value="event">이벤트</option>
+              <option value="maintenance">점검</option>
+              <option value="apology">사과/보상</option>
+              <option value="deadline">만료 임박</option>
+            </select>
+          </div>
+          <div style="flex:1; min-width:190px;">
+            <label>CTA</label>
+            <select id="cta">
+              <option value="mailbox" selected>우편함 확인(존댓말)</option>
+              <option value="claim">지금 받기(존댓말)</option>
+              <option value="none">표시 안 함</option>
+            </select>
+          </div>
+          <div style="flex:1; min-width:190px;">
+            <label>생성 개수(언어별)</label>
+            <select id="count">
+              <option value="3">3개</option>
+              <option value="5" selected>5개</option>
+              <option value="8">8개</option>
+            </select>
+          </div>
+        </div>
+
+        <table class="table" id="rewardTable">
+          <thead>
+            <tr>
+              <th style="width:28%;">KR 보상명</th>
+              <th style="width:20%;">수량 <span class="mini">(예: 300개 / 10장)</span></th>
+              <th style="width:26%;">EN 보상명(옵션)</th>
+              <th style="width:26%;">JP 보상명(옵션)</th>
+              <th style="width:8%;">삭제</th>
+            </tr>
+          </thead>
+          <tbody id="rewardTbody"></tbody>
+        </table>
+
+        <div class="hint">
+          • EN/JP 보상명을 비워두면 KR 보상명을 그대로 사용합니다.<br/>
+          • “우편함 확인” 문구가 <b>두 번 반복되지 않도록</b> 자동으로 중복 요소를 제거합니다.
+        </div>
+      </div>
+
+      <!-- OUTPUT -->
+      <div class="card">
+        <div class="row" style="justify-content:space-between; margin-bottom:10px;">
+          <div class="pill">랜덤 템플릿 · 중복 제거 · 자동 축약</div>
+          <button class="btn primary" id="generateBtn">생성</button>
+        </div>
+
+        <div class="outBox" id="outBox"></div>
+
+        <div class="footer">
+          byte 계산: <code>TextEncoder().encode(text).length</code><br/>
+          축약 순서: (1) 선택 문장 요소 제거 → (2) 보상 요약 축소 → (3) 최종 안전 자르기
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const TITLE_MAX = 25;
+  const BODY_MAX  = 100;
+  const enc = new TextEncoder();
+
+  function byteLen(s){ return enc.encode(s).length; }
+
+  // Crypto-safe random
+  function randInt(max){
+    const a = new Uint32Array(1);
+    crypto.getRandomValues(a);
+    return a[0] % max;
+  }
+  function pick(arr){
+    if (!arr || arr.length === 0) return "";
+    return arr[randInt(arr.length)];
+  }
+
+  function truncateToBytes(str, maxBytes){
+    if (byteLen(str) <= maxBytes) return { text: str, truncated: false };
+    let out = "";
+    for (const ch of str){
+      const next = out + ch;
+      if (byteLen(next) > maxBytes) break;
+      out = next;
+    }
+    return { text: out, truncated: true };
+  }
+
+  function nvl(x){ return (x ?? "").toString().trim(); }
+
+  function compactReward(name, qty, lang){
+    const n = nvl(name);
+    const q = nvl(qty);
+    if (!n && !q) return "";
+    if (!q) return n;
+    // Add a space for readability (still byte-efficient enough under 100B)
+    const space = " ";
+    return `${n}${space}${q}`.trim();
+  }
+
+  function pickName(r, lang){
+    if (lang === "KR") return nvl(r.kr);
+    if (lang === "EN") return nvl(r.en) || nvl(r.kr);
+    if (lang === "JP") return nvl(r.jp) || nvl(r.kr);
+    return nvl(r.kr);
+  }
+
+  function containsMailbox(text, lang){
+    const t = (text || "").toLowerCase();
+    if (lang === "KR") return t.includes("우편함");
+    if (lang === "EN") return t.includes("mailbox") || t.includes("mail");
+    if (lang === "JP") return t.includes("メール");
+    return false;
+  }
+
+  // Reward summary builder with style variation, within a byte budget.
+  function buildRewardSummary(rewards, lang, maxBytes){
+    const items = rewards
+      .map(r => ({ name: pickName(r, lang), qty: r.qty }))
+      .map(x => compactReward(x.name, x.qty, lang))
+      .filter(Boolean);
+
+    if (items.length === 0) return "";
+
+    const sepOptions = (lang === "KR") ? [" · ", " / ", " + ", ", "] : (lang === "JP") ? ["・", "／", "＋", "、"] : [" · ", " / ", " + ", ", "];
+    const sep = pick(sepOptions);
+
+    const full = items.join(sep);
+    if (byteLen(full) <= maxBytes) return full;
+
+    // Shorten to "첫 보상 + 외N/他N/+N"
+    const suffix = (() => {
+      if (items.length < 2) return "";
+      const n = items.length - 1;
+      if (lang === "KR") return ` 외 ${n}종`;
+      if (lang === "JP") return ` 他${n}`;
+      return ` +${n}`;
+    })();
+
+    if (items.length >= 2){
+      const cand = items[0] + suffix;
+      if (byteLen(cand) <= maxBytes) return cand;
+
+      // truncate first then suffix
+      const suffixBytes = byteLen(suffix);
+      const firstBudget = Math.max(0, maxBytes - suffixBytes);
+      const t = truncateToBytes(items[0], firstBudget);
+      return t.text + suffix;
+    }
+
+    // single item: truncate
+    return truncateToBytes(items[0], maxBytes).text;
+  }
+
+  function templatePool(reason, cta, lang){
+    const ctaToken = (() => {
+      if (cta === "none") return "";
+      if (lang === "KR") return (cta === "mailbox") ? "우편함을 확인해 주세요." : "지금 바로 수령해 주세요.";
+      if (lang === "EN") return (cta === "mailbox") ? "Please check your Mailbox." : "Please claim it now.";
+      if (lang === "JP") return (cta === "mailbox") ? "メールをご確認ください。" : "今すぐお受け取りください。";
+      return "";
+    })();
+
+    const titleBase = {
+      KR: {
+        generic: ["보상이 지급되었어요", "선물이 도착했어요", "보상 지급 안내", "우편함에 보상이 있어요", "보상 수령 안내"],
+        attendance: ["출석 보상이 도착했어요", "오늘의 출석 선물", "출석 보상 지급 안내", "로그인 선물 도착"],
+        event: ["이벤트 보상이 도착했어요", "참여 보상 지급 안내", "이벤트 보상 안내", "이벤트 선물 도착"],
+        maintenance: ["점검 보상이 지급되었어요", "점검 보상 안내", "점검 보상 지급 안내"],
+        apology: ["보상이 지급되었어요", "보상 지급 안내", "불편 보상 안내", "보상 전달 안내"],
+        deadline: ["보상 수령이 곧 종료돼요", "오늘까지 수령 가능해요", "보상 만료가 임박했어요", "수령 기한이 얼마 남지 않았어요"]
+      },
+      EN: {
+        generic: ["Rewards are here", "You've got rewards", "Reward delivery", "Mailbox reward", "Reward notice"],
+        attendance: ["Daily login reward", "Check-in reward", "Today's gift"],
+        event: ["Event reward", "Thanks for joining", "Event gift"],
+        maintenance: ["Maintenance reward", "Compensation notice", "Update reward"],
+        apology: ["Compensation", "Apology reward", "We're sorry"],
+        deadline: ["Claim before it ends", "Ends soon", "Last chance"]
+      },
+      JP: {
+        generic: ["報酬が届きました", "プレゼントがあります", "報酬のご案内", "メールに報酬", "受取のご案内"],
+        attendance: ["ログイン報酬", "出席報酬", "本日のギフト"],
+        event: ["イベント報酬", "参加ありがとうございます", "イベントギフト"],
+        maintenance: ["メンテ報酬", "補填のご案内", "更新報酬"],
+        apology: ["補填", "お詫び報酬", "お詫びのご案内"],
+        deadline: ["期限が近いです", "まもなく終了", "お早めに"]
+      }
+    }[lang][reason] || [];
+
+    // Title templates (varied but short)
+    const titleTpl = {
+      KR: [
+        "{base}",
+        "{base}: {rewardShort}",
+        "{rewardShort} 지급 안내",
+        "{rewardShort}이(가) 도착했어요"
+      ],
+      EN: [
+        "{base}",
+        "{base}: {rewardShort}",
+        "{rewardShort} delivered",
+        "Get {rewardShort}"
+      ],
+      JP: [
+        "{base}",
+        "{base}：{rewardShort}",
+        "{rewardShort} 配布",
+        "{rewardShort} 受取"
+      ]
+    }[lang];
+
+    // Body templates (polite KR; avoid repeating mailbox in suffix)
+    const bodyTpl = {
+      KR: [
+        "{rewardLong}이(가) 지급되었어요. 지금 우편함에서 확인해 주세요.",
+        "{rewardLong} 지급이 완료되었어요. 우편함에서 수령해 주세요.",
+        "우편함에 {rewardLong}이(가) 도착했어요. 확인해 주세요.",
+        "{rewardLong}이(가) 준비되어 있어요. 우편함에서 받아 주세요.",
+        "{rewardLong} 지급 안내입니다. 우편함에서 확인해 주세요."
+      ],
+      EN: [
+        "{rewardLong} has been sent. Please check your Mailbox.",
+        "Mailbox reward: {rewardLong}.",
+        "Rewards delivered: {rewardLong}. Please check your Mailbox.",
+        "{rewardLong} is waiting in your Mailbox.",
+        "You can claim {rewardLong} from your Mailbox."
+      ],
+      JP: [
+        "{rewardLong} を配布しました。メールをご確認ください。",
+        "メールに {rewardLong} をお届けしました。",
+        "報酬：{rewardLong}。メールで受け取れます。",
+        "{rewardLong} はメールに届いています。",
+        "メールから {rewardLong} をお受け取りください。"
+      ]
+    }[lang];
+
+    // Optional suffixes (no mailbox words to avoid repetition)
+    const suffixes = {
+      KR: ["", " 놓치지 마세요.", "지금 확인하시면 돼요.", "바로 확인해 주세요."],
+      EN: ["", " Don't miss it.", " Please take a look.", " It's ready now."],
+      JP: ["", " お見逃しなく。", " 今ご確認ください。", " すぐ受け取れます。"]
+    }[lang];
+
+    return { titleBase, titleTpl, bodyTpl, suffixes, ctaToken };
+  }
+
+  function formatTpl(tpl, vars){
+    return tpl
+      .replaceAll("{base}", vars.base ?? "")
+      .replaceAll("{rewardShort}", vars.rewardShort ?? "")
+      .replaceAll("{rewardLong}", vars.rewardLong ?? "");
+  }
+
+  // Fit helper: remove optional pieces before hard truncate.
+  function fitText(buildSteps, maxBytes){
+    for (const fn of buildSteps){
+      const s = fn();
+      if (byteLen(s) <= maxBytes) return { text:s, truncated:false };
+    }
+    const s = buildSteps[0]();
+    const t = truncateToBytes(s, maxBytes);
+    return { text:t.text, truncated:true };
+  }
+
+  function generateOne(rewards, reason, cta, lang){
+    const pool = templatePool(reason, cta, lang);
+    const base = pick(pool.titleBase);
+    const titleTpl = pick(pool.titleTpl);
+    const bodyTpl = pick(pool.bodyTpl);
+    const suffix = pick(pool.suffixes);
+
+    // Reward strings
+    const wantsRewardInTitle = titleTpl.includes("{rewardShort}");
+    let rewardShort = "";
+    if (wantsRewardInTitle){
+      // conservative budget for title reward
+      const skeleton = formatTpl(titleTpl, { base, rewardShort:"" }).replace(/\s+/g," ").trim();
+      const overhead = byteLen(skeleton);
+      const budget = Math.max(0, TITLE_MAX - overhead - 1);
+      rewardShort = buildRewardSummary(rewards, lang, budget);
+    }
+
+    const titleSteps = [
+      () => formatTpl(titleTpl, { base, rewardShort }).replace(/\s+/g," ").trim(),
+      () => base,
+    ];
+    const titleRes = fitText(titleSteps, TITLE_MAX);
+
+    // Body: stepwise (with suffix and CTA if not already implied)
+    const baseBodySkeleton = formatTpl(bodyTpl, { rewardLong:"" });
+
+    function buildBody({useSuffix, useCta, rewardAggressive}){
+      const tailSuffix = useSuffix ? suffix : "";
+      let ctaToken = (useCta ? pool.ctaToken : "");
+
+      // Avoid repeating mailbox CTA if body already contains mailbox word.
+      const bodyPreview = baseBodySkeleton + tailSuffix;
+      if (ctaToken && containsMailbox(bodyPreview, lang) && cta === "mailbox"){
+        ctaToken = ""; // already instructs mailbox
+      }
+
+      const overhead = byteLen(baseBodySkeleton) + byteLen(tailSuffix) + (ctaToken ? (1 + byteLen(ctaToken)) : 0);
+      const budget = Math.max(0, BODY_MAX - overhead);
+      const rewardLong = buildRewardSummary(rewards, lang, budget);
+
+      let s = formatTpl(bodyTpl, { rewardLong });
+      if (tailSuffix) s += tailSuffix;
+      if (ctaToken) s += " " + ctaToken;
+      return s.replace(/\s+/g," ").trim();
+    }
+
+    const bodySteps = [
+      () => buildBody({useSuffix:true, useCta:true}),
+      () => buildBody({useSuffix:true, useCta:false}),
+      () => buildBody({useSuffix:false, useCta:true}),
+      () => buildBody({useSuffix:false, useCta:false}),
+    ];
+    const bodyRes = fitText(bodySteps, BODY_MAX);
+
+    return {
+      lang,
+      title: titleRes.text,
+      body: bodyRes.text,
+      titleBytes: byteLen(titleRes.text),
+      bodyBytes: byteLen(bodyRes.text),
+      titleTruncated: titleRes.truncated,
+      bodyTruncated: bodyRes.truncated
+    };
+  }
+
+  function generateVariants(rewards, reason, cta, lang, count){
+    // Generate plenty and keep unique (title||body). If not enough unique, returns what it can.
+    const tries = Math.max(80, count * 30);
+    const seen = new Set();
+    const out = [];
+    for (let i=0; i<tries && out.length < count; i++){
+      const o = generateOne(rewards, reason, cta, lang);
+      const key = o.title + "||" + o.body;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(o);
+    }
+    return out;
+  }
+
+  // UI
+  const tbody = document.getElementById("rewardTbody");
+  const outBox = document.getElementById("outBox");
+
+  function escapeHtml(s){
+    return (s ?? "").toString()
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#039;");
+  }
+
+  function makeRow(data = { kr:"", qty:"", en:"", jp:"" }){
+    const tr = document.createElement("tr");
+
+    const tdKR = document.createElement("td");
+    tdKR.innerHTML = `<input placeholder="예) 다이아" value="${escapeHtml(data.kr)}" data-field="kr">`;
+
+    const tdQty = document.createElement("td");
+    tdQty.innerHTML = `<input placeholder="예) 300개 / 10장" value="${escapeHtml(data.qty)}" data-field="qty">`;
+
+    const tdEN = document.createElement("td");
+    tdEN.innerHTML = `<input placeholder="예) Gems" value="${escapeHtml(data.en)}" data-field="en">`;
+
+    const tdJP = document.createElement("td");
+    tdJP.innerHTML = `<input placeholder="예) ジェム" value="${escapeHtml(data.jp)}" data-field="jp">`;
+
+    const tdDel = document.createElement("td");
+    const delBtn = document.createElement("button");
+    delBtn.className = "btn danger";
+    delBtn.textContent = "삭제";
+    delBtn.onclick = () => { tr.remove(); };
+    tdDel.appendChild(delBtn);
+
+    [tdKR, tdQty, tdEN, tdJP, tdDel].forEach(td => tr.appendChild(td));
+    return tr;
+  }
+
+  function collectRewards(){
+    const rewards = [];
+    for (const tr of tbody.querySelectorAll("tr")){
+      const r = { kr:"", qty:"", en:"", jp:"" };
+      tr.querySelectorAll("input").forEach(inp => {
+        const f = inp.getAttribute("data-field");
+        r[f] = inp.value;
+      });
+      if (nvl(r.kr) || nvl(r.qty) || nvl(r.en) || nvl(r.jp)) rewards.push(r);
+    }
+    return rewards;
+  }
+
+  function statusPill(bytes, max, truncated){
+    const ok = bytes <= max;
+    const cls = ok ? "ok" : "bad";
+    const t = truncated ? " (축약)" : "";
+    return `<span class="${cls}">${bytes}/${max}B${t}</span>`;
+  }
+
+  function renderVariant(o, idx){
+    const idT = `t_${o.lang}_${idx}`;
+    const idB = `b_${o.lang}_${idx}`;
+
+    const div = document.createElement("div");
+    div.className = "variant";
+    div.innerHTML = `
+      <div class="variantTop">
+        <div class="tag">#${idx+1} · 제목 ${statusPill(o.titleBytes, TITLE_MAX, o.titleTruncated)} · 본문 ${statusPill(o.bodyBytes, BODY_MAX, o.bodyTruncated)}</div>
+        <div class="copyRow">
+          <button class="btn" data-copy="${idT}">제목 복사</button>
+          <button class="btn" data-copy="${idB}">본문 복사</button>
+          <button class="btn" data-copy-both="${o.lang}::${idx}">제목+본문</button>
+        </div>
+      </div>
+
+      <div class="kv">
+        <div class="k">제목</div>
+        <div class="v"><input readonly id="${idT}" value="${escapeHtml(o.title)}"></div>
+        <div class="k">본문</div>
+        <div class="v"><input readonly id="${idB}" value="${escapeHtml(o.body)}"></div>
+      </div>
+    `;
+
+    div.querySelectorAll("button[data-copy]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-copy");
+        const el = document.getElementById(id);
+        await navigator.clipboard.writeText(el.value);
+        const old = btn.textContent;
+        btn.textContent = "복사됨";
+        setTimeout(() => btn.textContent = old, 700);
+      });
+    });
+
+    div.querySelectorAll("button[data-copy-both]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const [lang, idxStr] = btn.getAttribute("data-copy-both").split("::");
+        const t = document.getElementById(`t_${lang}_${idxStr}`).value;
+        const b = document.getElementById(`b_${lang}_${idxStr}`).value;
+        await navigator.clipboard.writeText(`Title: ${t}\nBody: ${b}`);
+        const old = btn.textContent;
+        btn.textContent = "복사됨";
+        setTimeout(() => btn.textContent = old, 700);
+      });
+    });
+
+    return div;
+  }
+
+  function renderLangBlock(lang, variants){
+    const card = document.createElement("div");
+    card.className = "outCard";
+
+    card.innerHTML = `
+      <div class="outHead">
+        <div class="lang">${lang}</div>
+        <div class="pill">랜덤 후보 ${variants.length}개</div>
+      </div>
+      <div class="v" id="list_${lang}"></div>
+    `;
+
+    const list = card.querySelector(`#list_${lang}`);
+    variants.forEach((v, i) => list.appendChild(renderVariant(v, i)));
+    return card;
+  }
+
+  function render(){
+    const rewards = collectRewards();
+    const reason = document.getElementById("reason").value;
+    const cta = document.getElementById("cta").value;
+    const count = parseInt(document.getElementById("count").value, 10);
+
+    const langs = ["KR","EN","JP"];
+    outBox.innerHTML = "";
+    langs.forEach(lang => {
+      const variants = generateVariants(rewards, reason, cta, lang, count);
+      outBox.appendChild(renderLangBlock(lang, variants));
+    });
+  }
+
+  document.getElementById("addRowBtn").addEventListener("click", () => {
+    tbody.appendChild(makeRow());
+  });
+
+  document.getElementById("generateBtn").addEventListener("click", render);
+
+  document.getElementById("resetBtn").addEventListener("click", () => {
+    tbody.innerHTML = "";
+    tbody.appendChild(makeRow({ kr:"다이아", qty:"300개", en:"Gems", jp:"ジェム" }));
+    tbody.appendChild(makeRow({ kr:"소환권", qty:"10장", en:"Summon Ticket", jp:"召喚チケット" }));
+    document.getElementById("reason").value = "generic";
+    document.getElementById("cta").value = "mailbox";
+    document.getElementById("count").value = "5";
+    render();
+  });
+
+  // bootstrap
+  tbody.appendChild(makeRow({ kr:"다이아", qty:"300개", en:"Gems", jp:"ジェム" }));
+  render();
+</script>
+</body>
+</html>
